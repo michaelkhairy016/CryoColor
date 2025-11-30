@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Repaint Dashboard</title>
+
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- Import Map -->
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "three": "https://esm.sh/three@0.160.0",
+            "@react-three/fiber": "https://esm.sh/@react-three/fiber@8.15.16?external=react,react-dom,three",
+            "@react-three/drei": "https://esm.sh/@react-three/drei@9.99.0?external=react,react-dom,three,@react-three/fiber"
+        }
+    }
+    </script>
+
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, Suspense } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { Canvas } from '@react-three/fiber';
+        import { useGLTF, Stage, OrbitControls, Html } from '@react-three/drei';
+
+        // --- MOCK DATA ---
+        const carPartsData = [
+            {
+                id: 'hood',
+                name: 'Hood',
+                repaintCount: 145,
+                mostFrequentColor: '#ff0000',
+                meshNamePattern: /hood/i
+            },
+            {
+                id: 'roof',
+                name: 'Roof',
+                repaintCount: 89,
+                mostFrequentColor: '#000000',
+                meshNamePattern: /roof/i
+            },
+            {
+                id: 'door_fl',
+                name: 'Front Left Door',
+                repaintCount: 210,
+                mostFrequentColor: '#0000ff',
+                meshNamePattern: /door.*fl|front.*left/i
+            },
+            {
+                id: 'door_fr',
+                name: 'Front Right Door',
+                repaintCount: 198,
+                mostFrequentColor: '#ffffff',
+                meshNamePattern: /door.*fr|front.*right/i
+            },
+            {
+                id: 'trunk',
+                name: 'Trunk',
+                repaintCount: 67,
+                mostFrequentColor: '#c0c0c0',
+                meshNamePattern: /trunk|boot/i
+            },
+            {
+                id: 'bumper_f',
+                name: 'Front Bumper',
+                repaintCount: 320,
+                mostFrequentColor: '#1a1a1a',
+                meshNamePattern: /bumper.*f/i
+            }
+        ];
+
+        const getPartData = (meshName) => {
+            return carPartsData.find(part => part.meshNamePattern.test(meshName));
+        };
+
+        // --- ERROR BOUNDARY ---
+        class ErrorBoundary extends React.Component {
+            constructor(props) {
+                super(props);
+                this.state = { hasError: false, error: null };
+            }
+
+            static getDerivedStateFromError(error) {
+                return { hasError: true, error };
+            }
+
+            render() {
+                if (this.state.hasError) {
+                    return (
+                        <div style={{
+                            position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)',
+                            background: 'rgba(0,0,0,0.8)', padding: '20px', borderRadius: '10px', border: '1px solid #ff4444',
+                            textAlign: 'center', maxWidth: '400px'
+                        }}>
+                            <h2 style={{ color: '#ff4444', marginTop: 0 }}>⚠️ Error Loading 3D Model</h2>
+                            <p style={{ fontSize: '0.9rem', color: '#ddd' }}>
+                                {this.state.error?.message || 'Unknown error occurred'}
+                            </p>
+                            <button onClick={() => window.location.reload()} style={{
+                                background: '#ff4444', border: 'none', color: 'white', padding: '8px 16px', borderRadius: '4px', cursor: 'pointer'
+                            }}>
+                                Retry
+                            </button>
+                        </div>
+                    );
+                }
+                return this.props.children;
+            }
+        }
+
+        // --- CAR MODEL COMPONENT ---
+        function CarModel({ onPartHover }) {
+            const { scene } = useGLTF('models/car.glb');
+            const [hoveredMesh, setHoveredMesh] = useState(null);
+
+            useEffect(() => {
+                scene.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+
+                        const partData = getPartData(child.name);
+                        child.material = child.material.clone();
+
+                        if (partData) {
+                            child.material.color.set(partData.mostFrequentColor);
+                            child.userData = { ...child.userData, partData };
+                        }
+                    }
+                });
+
+                console.log("Loaded Model Structure:", scene);
+            }, [scene]);
+
+            const handlePointerOver = (e) => {
+                e.stopPropagation();
+                const mesh = e.object;
+                if (mesh.userData.partData) {
+                    setHoveredMesh(mesh.name);
+                    onPartHover(mesh.userData.partData);
+                    mesh.material.emissive.setHex(0x333333);
+                }
+            };
+
+            const handlePointerOut = (e) => {
+                e.stopPropagation();
+                const mesh = e.object;
+                if (mesh.userData.partData) {
+                    setHoveredMesh(null);
+                    onPartHover(null);
+                    mesh.material.emissive.setHex(0x000000);
+                }
+            };
+
+            return (
+                <primitive
+                    object={scene}
+                    scale={1.5}
+                    onPointerOver={handlePointerOver}
+                    onPointerOut={handlePointerOut}
+                />
+            );
+        }
+
+        // --- MAIN APP COMPONENT ---
+        function App() {
+            const [hoveredPart, setHoveredPart] = useState(null);
+
+            return (
+                <>
+                    <div className="dashboard-overlay">
+                        <div className="stats-panel">
+                            <h1>Factory Repaint Stats</h1>
+                            <p>Hover over car parts to see details.</p>
+
+                            {hoveredPart ? (
+                                <div className="part-details">
+                                    <h2 style={{ color: '#00d2ff' }}>{hoveredPart.name}</h2>
+                                    <p><strong>Repaints:</strong> {hoveredPart.repaintCount}</p>
+                                    <p><strong>Top Color:</strong>
+                                        <span style={{ color: hoveredPart.mostFrequentColor, fontWeight: 'bold', marginLeft: '5px' }}>
+                                            {hoveredPart.mostFrequentColor}
+                                        </span>
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="summary">
+                                    <h3>Overview</h3>
+                                    <p>Total Parts Tracked: {carPartsData.length}</p>
+                                    <div className="legend">
+                                        {carPartsData.map(part => (
+                                            <div key={part.id} className="legend-item">
+                                                <div className="color-dot" style={{ backgroundColor: part.mostFrequentColor }}></div>
+                                                <span>{part.name}</span>
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <ErrorBoundary>
+                        <Canvas shadows camera={{ position: [4, 2, 5], fov: 50 }}>
+                            <Suspense fallback={<Html><div className="loading-screen">Loading 3D Model...</div></Html>}>
+                                <Stage environment="city" intensity={0.6}>
+                                    <CarModel onPartHover={setHoveredPart} />
+                                </Stage>
+                                <OrbitControls makeDefault autoRotate autoRotateSpeed={0.5} />
+                            </Suspense>
+                        </Canvas>
+                    </ErrorBoundary>
+                </>
+            );
+        }
+
+        // --- RENDER ---
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+
+</html>
